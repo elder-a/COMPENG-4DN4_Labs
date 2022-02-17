@@ -6,6 +6,7 @@ import getpass
 import sys
 
 
+## Commands
 GET_MIDTERM_AVG_CMD  = "GMA"
 GET_LAB_1_AVG_CMD    = "GL1A"
 GET_LAB_2_AVG_CMD    = "GL2A"
@@ -18,6 +19,7 @@ GET_EXAM_4_AVG_CMD   = "GE4A"
 GET_GRADES_CMD       = "GG"
 
 
+## Student class
 class Student:
     def __init__(self, data, headers):
         self.data = {headers[i]:data[i] for i in range(len(headers))}
@@ -25,29 +27,15 @@ class Student:
     def get(self, attr):
         return self.data[attr]
 
-########################################################################
-# Echo Server class
-########################################################################
 
+## Server class
 class Server:
-
-    # Set the server hostname used to define the server socket address
-    # binding. Note that 0.0.0.0 or "" serves as INADDR_ANY. i.e.,
-    # bind to all local network interface addresses.
     HOSTNAME = "0.0.0.0"
-
-    # Set the server port to bind the listen socket to.
     PORT = 50000
-
     RECV_BUFFER_SIZE = 1024
-    MAX_CONNECTION_BACKLOG = 10
-    
+    MAX_CONNECTION_BACKLOG = 10    
     MSG_ENCODING = "utf-8"
-
-    # Create server socket address. It is a tuple containing
-    # address/hostname and port.
     SOCKET_ADDRESS = (HOSTNAME, PORT)
-
 
     def __init__(self):
         self.parse_csv("course_grades_2022.csv")
@@ -57,8 +45,17 @@ class Server:
     def parse_csv(self, filename):
         self.students = {}
         with open(filename, 'r') as f:
-            headers = f.readline().strip().split(',')
-            students_raw = [entry.strip().split(',') for entry in f.readlines()]
+            print("Data read from CSV file:")
+
+            headers = f.readline()
+            print(headers.strip())
+            headers = headers.strip().split(',')
+
+            lines = f.readlines()
+            students_raw = []
+            for line in lines:
+                print(line.strip())
+                students_raw.append(line.strip().split(','))
 
             for s in students_raw:
                 student = Student(s, headers)
@@ -70,7 +67,7 @@ class Server:
             
             # pre-compute all the averages
             self.averages = defaultdict(lambda: 0)
-            num_students = float(len(self.students))
+            num_students = len(self.students)
             for s in self.students.values(): 
                 self.averages[GET_MIDTERM_AVG_CMD] += float(s.get("Midterm")) / num_students
                 self.averages[GET_LAB_1_AVG_CMD]   += float(s.get("Lab 1"))   / num_students
@@ -104,10 +101,7 @@ class Server:
     def process_connections_forever(self):
         try:
             while True:
-                # Block while waiting for accepting incoming
-                # connections. When one is accepted, pass the new
-                # (cloned) socket reference to the connection handler
-                # function.
+                # Block while waiting for accepting incoming connections
                 self.connection_handler(self.socket.accept())
         except Exception as msg:
             print(msg)
@@ -119,15 +113,19 @@ class Server:
 
     def process_cmd(self, cmd_str):
         if cmd_str in self.averages:
+            print(f"Received {cmd_str} cmd from client")
             return str(self.averages[cmd_str])
         else:
             # interpret as hash or error out
+            print(f"Received IP/password hash {cmd_str}")
             if cmd_str in self.students:
+                print("Correct password, record found")
                 s = self.students[cmd_str]
-                # actual sorcery
+                # actual sorcery - return only grades - no identifying info
                 return str({key:value for key,value in list(s.data.items())[list(s.data).index("Lab 1"):]})
             else:
-                return "NO RECORD"
+                print("Password Failure")
+                return "Password Failure"
 
     def connection_handler(self, client):
         connection, address_port = client
@@ -137,35 +135,30 @@ class Server:
         while True:
             try:
                 # Receive bytes over the TCP connection. This will block
-                # until "at least 1 byte or more" is available.
                 recvd_bytes = connection.recv(Server.RECV_BUFFER_SIZE)
             
                 # If recv returns with zero bytes, the other end of the
-                # TCP connection has closed (The other end is probably in
-                # FIN WAIT 2 and we are in CLOSE WAIT.). If so, close the
-                # server end of the connection and get the next client
-                # connection.
+                # TCP connection has closed
                 if len(recvd_bytes) == 0:
                     print("Closing client connection ... ")
                     connection.close()
                     break
                 
-                # Decode the received bytes back into strings. Then output
-                # them.
+                # Decode the received bytes back into strings.
                 recvd_str = recvd_bytes.decode(Server.MSG_ENCODING)
-                print("Received: {}".format(recvd_str))
+                # print("Received: {}".format(recvd_str))
 
                 # Process the incoming command
                 response_str = self.process_cmd(recvd_str)
                 
+                # extend response if exactly 128 bytes - prevent client from waiting for more
+                if len(response_str) == Client.RECV_BUFFER_SIZE:
+                    response_str += " "
+                
                 # Send response back to client
-                if response_str is not None:
-                    if len(response_str) == Client.RECV_BUFFER_SIZE:
-                        print("Extending..") # extend response if exactly 128 bytes - prevent client from waiting for more
-                        response_str += " "
-                    sendvd_bytes = response_str.encode(Server.MSG_ENCODING)
-                    connection.sendall(sendvd_bytes)
-                    print("Sent: {}".format(sendvd_bytes))
+                sendvd_bytes = response_str.encode(Server.MSG_ENCODING)
+                connection.sendall(sendvd_bytes)
+                print("Sent: {}".format(sendvd_bytes))
 
             except KeyboardInterrupt:
                 print()
@@ -173,17 +166,10 @@ class Server:
                 connection.close()
                 break
 
-########################################################################
-# Echo Client class
-########################################################################
 
+## Client class
 class Client:
-
-    # Set the server hostname to connect to. If the server and client
-    # are running on the same machine, we can use the current
-    # hostname.
-    SERVER_HOSTNAME = socket.gethostname()
-
+    SERVER_HOSTNAME = socket.gethostname() # if client and server on the same machine, gethostname() will work
     RECV_BUFFER_SIZE = 128
 
     def __init__(self):
@@ -208,15 +194,44 @@ class Client:
             sys.exit(1)
 
     def get_console_input(self):
-        # In this version we keep prompting the user until a non-blank
-        # line is entered.
         while True:
-            self.input_text = input("Input: ")
+            self.input_text = input("Enter Command: ")
+
             if self.input_text != "":
+                print("Command Entered: ", self.input_text)
+
                 if self.input_text == GET_GRADES_CMD:
+                    ID = input('User ID: ')
+                    PWD = getpass.getpass('Password: ')
+                    print("ID number: ", ID)
+                    print("Password: ", '*'*len(PWD))
+
                     auth_hash = hashlib.sha256()
-                    auth_hash.update(f"{input('User ID: ')} {getpass.getpass('Password: ')}".encode('utf-8'))
+                    auth_hash.update(f"{ID} {PWD}".encode('utf-8'))
                     self.input_text = auth_hash.hexdigest()
+                else: # print "Fetching ..."
+                    if self.input_text == GET_MIDTERM_AVG_CMD:
+                        print_str = "Fetching Midterm Average"
+                    elif self.input_text == GET_LAB_1_AVG_CMD:
+                        print_str = "Fetching Lab 1 Average"
+                    elif self.input_text == GET_LAB_2_AVG_CMD:
+                        print_str = "Fetching Lab 2 Average"
+                    elif self.input_text == GET_LAB_3_AVG_CMD:
+                        print_str = "Fetching Lab 3 Average"
+                    elif self.input_text == GET_LAB_4_AVG_CMD:
+                        print_str = "Fetching Lab 4 Average"
+                    elif self.input_text == GET_EXAM_1_AVG_CMD:
+                        print_str = "Fetching Exam 1 Average"
+                    elif self.input_text == GET_EXAM_2_AVG_CMD:
+                        print_str = "Fetching Exam 2 Average"
+                    elif self.input_text == GET_EXAM_3_AVG_CMD:
+                        print_str = "Fetching Exam 3 Average"
+                    elif self.input_text == GET_EXAM_4_AVG_CMD:
+                        print_str = "Fetching Exam 4 Average"
+                    else:
+                        print_str = "Unrecongized cmd.."
+                    print(print_str)
+
                 break
     
     def send_console_input_forever(self):
@@ -235,7 +250,7 @@ class Client:
         try:
             # Send string objects over the connection. The string must
             # be encoded into bytes objects first.
-            print("(sendv: {})".format(self.input_text))
+            # print("(sendv: {})".format(self.input_text))
             self.socket.sendall(self.input_text.encode(Server.MSG_ENCODING))
         except Exception as msg:
             print(msg)
@@ -243,22 +258,21 @@ class Client:
 
     def connection_receive(self):
         try:
-            recvd_msg_length = Client.RECV_BUFFER_SIZE
+            recvd_msg_length = 0
             recvd_msg = ""
 
-            while(recvd_msg_length == Client.RECV_BUFFER_SIZE):
+            while(recvd_msg_length == Client.RECV_BUFFER_SIZE or not recvd_msg_length):
                 # Receive and print out text. The received bytes objects
                 # must be decoded into string objects.
                 recvd_bytes = self.socket.recv(Client.RECV_BUFFER_SIZE)
-                print("(recv: {})".format(recvd_bytes))
+                # print("(recv: {})".format(recvd_bytes))
 
                 recvd_msg += recvd_bytes.decode(Server.MSG_ENCODING)
-                recvd_msg_length = len(recvd_bytes)
+                recvd_msg_length += len(recvd_bytes)
 
                 # recv will block if nothing is available. If we receive
                 # zero bytes, the connection has been closed from the
-                # other end. In that case, close the connection on this
-                # end and exit.
+                # other end.
                 if recvd_msg_length == 0:
                     print("Closing server connection ... ")
                     self.socket.close()
@@ -270,15 +284,8 @@ class Client:
             print(msg)
             sys.exit(1)
 
-########################################################################
-# Process command line arguments if this module is run directly.
-########################################################################
 
-# When the python interpreter runs this module directly (rather than
-# importing it into another file) it sets the __name__ variable to a
-# value of "__main__". If this file is imported from another module,
-# then __name__ will be set to that module's name.
-
+## Program Entry
 if __name__ == '__main__':
     roles = {'client': Client,'server': Server}
     parser = argparse.ArgumentParser()
@@ -292,8 +299,6 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
     roles[args.role]()
-
-########################################################################
 
 
 
