@@ -170,7 +170,7 @@ class Server:
 ## Client class
 class Client:
     SERVER_HOSTNAME = socket.gethostname() # if client and server on the same machine, gethostname() will work
-    RECV_BUFFER_SIZE = 128
+    RECV_BUFFER_SIZE = 1024
 
     def __init__(self):
         self.get_socket()
@@ -258,25 +258,21 @@ class Client:
 
     def connection_receive(self):
         try:
-            recvd_msg_length = 0
-            recvd_msg = ""
+            # Receive and print out text. The received bytes objects
+            # must be decoded into string objects.
+            recvd_bytes = self.socket.recv(Client.RECV_BUFFER_SIZE)
+            # print("(recv: {})".format(recvd_bytes))
 
-            while(recvd_msg_length == Client.RECV_BUFFER_SIZE or not recvd_msg_length):
-                # Receive and print out text. The received bytes objects
-                # must be decoded into string objects.
-                recvd_bytes = self.socket.recv(Client.RECV_BUFFER_SIZE)
-                # print("(recv: {})".format(recvd_bytes))
+            # recv will block if nothing is available. If we receive
+            # zero bytes, the connection has been closed from the
+            # other end.
+            if len(recvd_bytes) == 0:
+                print("Closing server connection ... ")
+                self.socket.close()
+                sys.exit(1)
 
-                recvd_msg += recvd_bytes.decode(Server.MSG_ENCODING)
-                recvd_msg_length += len(recvd_bytes)
-
-                # recv will block if nothing is available. If we receive
-                # zero bytes, the connection has been closed from the
-                # other end.
-                if recvd_msg_length == 0:
-                    print("Closing server connection ... ")
-                    self.socket.close()
-                    sys.exit(1)
+            # decode message
+            recvd_msg = recvd_bytes.decode(Server.MSG_ENCODING)
 
             print("Received: ", recvd_msg)
 
