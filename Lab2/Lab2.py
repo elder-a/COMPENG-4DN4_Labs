@@ -117,7 +117,7 @@ class Server:
             return str(self.averages[cmd_str])
         else:
             # interpret as hash or error out
-            print(f"Received IP/password hash {cmd_str}")
+            print(f"Received IP/password hash {cmd_str} from client")
             if cmd_str in self.students:
                 print("Correct password, record found")
                 s = self.students[cmd_str]
@@ -209,6 +209,8 @@ class Client:
                     auth_hash = hashlib.sha256()
                     auth_hash.update(f"{ID} {PWD}".encode('utf-8'))
                     self.input_text = auth_hash.hexdigest()
+
+                    print("ID/Password hash: {} sent to server".format(self.input_text))
                 else: # print "Fetching ..."
                     if self.input_text == GET_MIDTERM_AVG_CMD:
                         print_str = "Fetching Midterm Average"
@@ -229,9 +231,9 @@ class Client:
                     elif self.input_text == GET_EXAM_4_AVG_CMD:
                         print_str = "Fetching Exam 4 Average"
                     else:
-                        print_str = "Unrecongized cmd.."
+                        print("Unrecongized cmd..")
+                        continue
                     print(print_str)
-
                 break
     
     def send_console_input_forever(self):
