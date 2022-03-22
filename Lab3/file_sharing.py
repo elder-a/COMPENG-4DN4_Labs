@@ -103,6 +103,9 @@ class Server:
 
     def __init__(self):
         self.create_sockets()
+        dir_list = str(os.listdir(SERVER_DIR)) #prints the server directory not sure which one we are going to use 
+        
+        print("Current Directory List: ", dir_list)
 
         service_disc_thread = threading.Thread(target=self.receive_broadcast_forever, args=())
         file_share_thread   = threading.Thread(target=self.receive_file_share_forever, args=())
@@ -233,8 +236,10 @@ class Server:
             
             # If we can't find the requested file, shutdown the connection
             # and wait for someone else.
+            
             try:
-                file = open(os.path.join(SERVER_DIR, filename), 'r').read()
+                #file = open(os.path.join(SERVER_DIR, filename), 'r').read() #original 
+                file = open(os.path.join(SERVER_DIR, filename), 'rb').read() #new 
             except FileNotFoundError:
                 print("Error: Requested file is not available!")
                 connection.close()                   
@@ -242,7 +247,10 @@ class Server:
 
             # Encode the file contents into bytes, record its size and
             # generate the file size field used for transmission.
-            file_bytes = file.encode(MSG_ENCODING)
+            
+            #file_bytes = file.encode(MSG_ENCODING) #original 
+            file_bytes = file #new 
+            
             file_size_bytes = len(file_bytes)
             file_size_field = file_size_bytes.to_bytes(FILESIZE_FIELD_LEN, byteorder='big')
 
@@ -310,15 +318,18 @@ class Server:
             print("Closing connection ...")            
             connection.close()
             return
-
+        
+        print("Made it to actual file writing")
         try:
             # Create a file using the received filename and store the
             # data.
             print("Received {} bytes. Creating file: {}" \
                   .format(len(recvd_bytes_total), filename))
-
-            with open(os.path.join(SERVER_DIR, filename.decode(MSG_ENCODING)), 'w') as f:
-                recvd_file = recvd_bytes_total.decode(MSG_ENCODING)
+            
+            with open(os.path.join(SERVER_DIR, filename.decode(MSG_ENCODING)), 'wb') as f: #original
+            #with open(os.path.join(SERVER_DIR, filename), 'w') as f:
+                #recvd_file = recvd_bytes_total.decode(MSG_ENCODING) #original
+                recvd_file = recvd_bytes_total
                 f.write(recvd_file)
             print(recvd_file)
         except:
@@ -495,7 +506,7 @@ class Client:
 
     def send_file(self, filename):
         try:
-            file = open(os.path.join(CLIENT_DIR, filename), 'r').read()
+            file = open(os.path.join(CLIENT_DIR, filename), 'rb').read() #changed to rb from r
         except FileNotFoundError:
             print("Error: Requested file was not found!")
             self.file_socket.close()                   
@@ -505,7 +516,9 @@ class Client:
 
         # Encode the file contents into bytes, record its size and
         # generate the file size field used for transmission.
-        file_bytes = file.encode(MSG_ENCODING)
+        #file_bytes = file.encode(MSG_ENCODING) #orignal becuase string before
+        
+        file_bytes = file
         file_size_bytes = len(file_bytes)
         file_size_field = file_size_bytes.to_bytes(FILESIZE_FIELD_LEN, byteorder='big')
 
@@ -520,8 +533,8 @@ class Client:
             self.file_socket.sendall(pkt)
             print("Sending file: ", filename)
             print("file size field: ", file_size_field.hex(), "\n")
-            with open(os.path.join(CLIENT_DIR, filename)) as f:
-                print(f.read())
+            #with open(os.path.join(CLIENT_DIR, filename)) as f:
+            #    print(f.read())
             # time.sleep(20)
         except socket.error:
             # If the client has closed the connection, close the
@@ -586,9 +599,11 @@ class Client:
             # data.
             print("Received {} bytes. Creating file: {}" \
                   .format(len(recvd_bytes_total), self.download_filename))
-
-            with open(os.path.join(CLIENT_DIR, self.download_filename), 'w') as f:
-                recvd_file = recvd_bytes_total.decode(MSG_ENCODING)
+            
+            #with open(os.path.join(CLIENT_DIR, self.download_filename), 'w') as f: #original 
+            with open(os.path.join(CLIENT_DIR, self.download_filename), 'wb') as f: #new 
+                #recvd_file = recvd_bytes_total.decode(MSG_ENCODING) #original 
+                recvd_file = recvd_bytes_total #new 
                 f.write(recvd_file)
             print(recvd_file)
         except:
