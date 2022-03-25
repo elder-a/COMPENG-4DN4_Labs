@@ -170,7 +170,8 @@ class Server:
             cmd = int.from_bytes(cmd_field, byteorder='big')
             print(cmd)
             if cmd == SERVER_CMDS[SERVER_GET_CMD]:
-                self.send_file(connection)
+                if (self.send_file(connection) == False):
+                    return
             elif cmd == SERVER_CMDS[SERVER_LIST_CMD]:
                 self.send_dir_list(connection)
             elif cmd == SERVER_CMDS[SERVER_PUT_CMD]:
@@ -208,12 +209,12 @@ class Server:
             if not status:
                 print("Closing connection ...")            
                 connection.close()
-                return
+                return False
             filename_size_bytes = int.from_bytes(filename_size_field, byteorder='big')
             if not filename_size_bytes:
                 print("Connection is closed!")
                 connection.close()
-                return
+                return False
             
             print('Filename size (bytes) = ', filename_size_bytes)
 
@@ -222,11 +223,11 @@ class Server:
             if not status:
                 print("Closing connection ...")            
                 connection.close()
-                return
+                return False
             if not filename_bytes:
                 print("Connection is closed!")
                 connection.close()
-                return
+                return False
             
             filename = filename_bytes.decode(MSG_ENCODING)
             print('Requested filename = ', filename)
@@ -243,7 +244,7 @@ class Server:
             except FileNotFoundError:
                 print("Error: Requested file is not available!")
                 connection.close()                   
-                return
+                return False
 
             # Encode the file contents into bytes, record its size and
             # generate the file size field used for transmission.
@@ -268,7 +269,7 @@ class Server:
                 # socket on this end.
                 print("Closing client connection ...")
                 connection.close()
-                return    
+                return False
 
     def recieve_file(self, connection):
         # Read the file size field returned by the server.
@@ -331,7 +332,9 @@ class Server:
                 #recvd_file = recvd_bytes_total.decode(MSG_ENCODING) #original
                 recvd_file = recvd_bytes_total
                 f.write(recvd_file)
-            print(recvd_file)
+            
+            ## print file contents
+            # print(recvd_file)
         except:
             print("Error writing file")
             exit(1)
@@ -605,7 +608,9 @@ class Client:
                 #recvd_file = recvd_bytes_total.decode(MSG_ENCODING) #original 
                 recvd_file = recvd_bytes_total #new 
                 f.write(recvd_file)
-            print(recvd_file)
+            
+            ## print file contents
+            # print(recvd_file)
         except:
             print("Error writing file")
             exit(1)
