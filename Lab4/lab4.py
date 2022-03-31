@@ -9,6 +9,8 @@ import time
 import struct
 import ipaddress
 from threading import Thread
+import json
+
 
 CLIENT_TO_CRD_CMDS = {
     "getdir"        : 1,
@@ -20,14 +22,7 @@ CLIENT_CMDS = ["connect", "bye", "name", "chat"]
 
 
 ########################################################################
-# Multicast Address and Port
-########################################################################
-
-MULTICAST_ADDRESS = "239.0.0.10"
-MULTICAST_PORT    =  2000
-
-########################################################################
-# Multicast Server
+# Server
 ########################################################################
 
 class Server:
@@ -41,13 +36,6 @@ class Server:
     MSG_ENCODING = "utf-8"
 
     chat_rooms = []
-    client_threads = []
-
-    # Create a 1-byte maximum hop count byte used in the multicast
-    # packets (i.e., TTL, time-to-live).
-    TTL = 1 # Hops
-    TTL_SIZE = 1 # Bytes
-    TTL_BYTE = TTL.to_bytes(TTL_SIZE, byteorder='big')
 
     def __init__(self):
         self.create_sockets()
@@ -57,17 +45,11 @@ class Server:
         try:
             # Create an IPv4 UDP and TCP sockets.
             self.CRDS_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.multicast_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-
             # Get socket layer socket options.
             self.CRDS_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
             # Bind socket to socket address, i.e., IP address and port.
             self.CRDS_socket.bind( Server.CRDS_address_port )
-            
-            # Set the multicast TTL.
-            self.multicast_socket.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, Server.TTL_BYTE)
-
         except Exception as msg:
             print(msg)
             sys.exit(1)
@@ -108,18 +90,23 @@ class Server:
             if cmd in CLIENT_TO_CRD_CMDS.values():
                 if CLIENT_TO_CRD_CMDS["getdir"] == cmd:
                     # send client the list of chat rooms
-                    chatroom_names = [cr["name"] for cr in Server.chat_rooms]
-                    connection.send(str(chatroom_names).encode(Server.MSG_ENCODING))
+                    connection.send(json.dumps(self.chat_rooms).encode(Server.MSG_ENCODING))
                 
                 elif CLIENT_TO_CRD_CMDS["makeroom"] == cmd:
                     # recieve more bytes containing chatroom name and multicast ip and port
-                    chatroom_name_byte_len = connection.recv(1)
+                    chatroom_name_byte_len = int.from_bytes(connection.recv(1), byteorder='big')
                     chatroom_name = connection.recv(chatroom_name_byte_len).decode(Server.MSG_ENCODING)
 
                     multicast_ip = socket.inet_ntoa(connection.recv(4))
-                    multicast_port = connection.recv(Server.RECV_SIZE)
+                    multicast_port = connection.recv(Server.RECV_SIZE).decode(Server.MSG_ENCODING)
 
-                    print("CHATROOM: ", chatroom_name, multicast_ip, multicast_port)
+                    # TODO: check if already exists
+
+                    self.chat_rooms.append({'name': chatroom_name, 'addr_port': (multicast_ip, multicast_port)})
+                    print("Added Chatroom to Directory: ", self.chat_rooms[-1])
+
+                    resp = 1
+                    connection.send(resp.to_bytes(1, byteorder='big'))
 
                 elif CLIENT_TO_CRD_CMDS["deleteroom"] == cmd:
                     # recieve more bytes to get chatroom name
@@ -136,25 +123,42 @@ class Server:
 # Multicast Client 
 ########################################################################
 
-RX_BIND_ADDRESS = "0.0.0.0"
+# MULTICAST_ADDRESS = "239.0.0.10"
 
-# Receiver socket will bind to the following.
-BIND_ADDRESS_PORT = (RX_BIND_ADDRESS, MULTICAST_PORT)
+RX_BIND_ADDRESS = "0.0.0.0"
 
 ########################################################################
 
 class Client:
 
     RECV_SIZE = 256
+        
+    # Create a 1-byte maximum hop count byte used in the multicast
+    # packets (i.e., TTL, time-to-live).
+    TTL = 1 # Hops
+    TTL_SIZE = 1 # Bytes
+    TTL_BYTE = TTL.to_bytes(TTL_SIZE, byteorder='big')
 
     def __init__(self):
-        self.create_sockets()
+        self.dir_list = None
+        self.create_socket()
         self.handle_console_input_forever()
 
-    def register_for_multicast_group(self, multicast_addr):           
+    def register_for_multicast_group(self, multicast_addr_port): 
+            self.multicast_addr_port = multicast_addr_port
 
-            multicast_group_bytes = socket.inet_aton(multicast_addr)
-            print("Multicast Group: ", multicast_addr)
+            # Sender
+            self.multicast_send = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self.multicast_send.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, Client.TTL_BYTE) 
+
+            # Receiver and Registration
+            self.multicast_rec = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self.multicast_rec.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, True)
+            self.multicast_rec.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, Client.TTL_BYTE)
+            self.multicast_rec.bind((RX_BIND_ADDRESS, int(multicast_addr_port[1])))           
+
+            multicast_group_bytes = socket.inet_aton(multicast_addr_port[0])
+            print("Multicast Group: ", multicast_addr_port[0])
 
             # Set up the interface to be used.
             multicast_if_bytes = socket.inet_aton(RX_BIND_ADDRESS)
@@ -164,16 +168,13 @@ class Client:
             print("multicast_request = ", multicast_request)
 
             # Issue the Multicast IP Add Membership request.
-            print("Adding membership (address/interface): ", multicast_addr,"/", RX_BIND_ADDRESS)
-            self.multicast_socket.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, multicast_request)
+            print("Adding membership (address/interface): ", multicast_addr_port[0],"/", multicast_addr_port[1])
+            self.multicast_rec.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, multicast_request)
 
-    def create_sockets(self):
+    def create_socket(self):
         try:
             self.CRDS_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-
-            self.multicast_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            self.multicast_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, True)
-            self.multicast_socket.bind(BIND_ADDRESS_PORT)
+        
         except Exception as msg:
             print(msg)
             sys.exit(1)
@@ -188,17 +189,64 @@ class Client:
             print(msg)
             sys.exit(1)
 
-    def enter_chat_room(self, chatroom):
+    def send_chat_msg(self):
         while True:
             try:
-                data, address_port = self.multicast_socket.recvfrom(Client.RECV_SIZE)
-                address, port = address_port
-                print("Received: {} {}".format(data.decode('utf-8'), address_port))
-            except KeyboardInterrupt:
-                print(); exit()
-            except Exception as msg:
-                print(msg)
-                sys.exit(1)
+                if self.send_thread_kill:
+                    return
+                msg = input(f'>> {self.name}: ')
+                msg_bytes = f'{self.name}: {msg}'.encode(Server.MSG_ENCODING)
+                addr_port = (self.multicast_addr_port[0], int(self.multicast_addr_port[1]))
+                print(addr_port)
+                self.multicast_send.sendto(msg_bytes, addr_port)
+            except:
+                self.recv_thread_kill = True
+                return
+
+    def receive_chat_msg(self):
+        try:
+            while True:
+                if self.recv_thread_kill:
+                    return
+                
+                chat_msg_bytes, ret_addr = self.multicast_rec.recvfrom(Client.RECV_SIZE)
+                chat_msg = chat_msg_bytes.decode(Server.MSG_ENCODING)
+                print(chat_msg)
+        except:
+            self.send_thread_kill = True
+            return
+
+    def enter_chat_room(self, chatroom):
+        try:
+            for room in self.dir_list:
+                print(room['name'], chatroom)
+                if room['name'] == chatroom:
+                    address = room["addr_port"][0]
+                    port = room["addr_port"][1]
+                    self.register_for_multicast_group((address, port))
+                    self.chatroom_name = room['name']
+                    break
+            else:
+                print("No room by that name...")
+                return
+            
+            send_thread = Thread(target=self.send_chat_msg)
+            recv_thread = Thread(target=self.receive_chat_msg)
+
+            self.recv_thread_kill = False
+            self.send_thread_kill = False
+            recv_thread.daemon = True
+            send_thread.daemon = True
+
+            send_thread.start()
+            recv_thread.start()
+
+            send_thread.join()
+            recv_thread.join()
+        except:
+            pass
+
+        print("Chat exited")
 
     def getdir(self):
         cmd_field = CLIENT_TO_CRD_CMDS["getdir"].to_bytes(1, byteorder='big')
@@ -208,15 +256,30 @@ class Client:
         if len(dir) == 0:
             self.CRDS_socket.close()
             return
-        dir_list = dir.decode(Server.MSG_ENCODING)
-        print(dir_list)
+        self.dir_list = json.loads(dir.decode(Server.MSG_ENCODING))
+        print(self.dir_list)
+
+    def send_room_info(self, room_info):
+        cmd_field = CLIENT_TO_CRD_CMDS["makeroom"].to_bytes(1, byteorder='big')
+
+        name_len_bytes = len(room_info['name']).to_bytes(1, byteorder='big')
+        name_bytes = room_info['name'].encode(Server.MSG_ENCODING)
+
+        address_bytes = socket.inet_aton(room_info['addr_port'][0])
+        port_str_bytes = room_info['addr_port'][1].encode(Server.MSG_ENCODING)
+
+        pkt = cmd_field + name_len_bytes + name_bytes + address_bytes + port_str_bytes
+
+        self.CRDS_socket.send(pkt)
+
+        print("Server resp:", int.from_bytes(self.CRDS_socket.recv(1), byteorder='big'))
 
     def handle_console_input_forever(self):
         while True:
             try:
                 self.input_text = input("Enter Command: ")
                 if self.input_text != "":
-                    print("Command Entered: ", self.input_text)
+                    print("Command Entered:", self.input_text)
 
                     if self.input_text == "connect":
                         print("Conneting to CRDS...")
@@ -230,13 +293,16 @@ class Client:
                         self.name = self.input_text.split()[1:]
 
                     elif self.input_text.split()[0] == "chat":
-                        self.enter_chat_room(self.input_text.split()[1:])
+                        self.enter_chat_room(' '.join(self.input_text.split()[1:]))
 
                     elif self.input_text.split()[0] == "makeroom":
                         cmd_params = self.input_text.split()[1:]
                         port = cmd_params[-1]
                         address = cmd_params[-2]
                         chatroom_name = ' '.join(cmd_params[:-2])
+
+                        room = {"name": chatroom_name, "addr_port": (address, port)}
+                        self.send_room_info(room)
 
                         print("Chatroom: ", chatroom_name, address, port)
 
