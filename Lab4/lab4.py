@@ -194,7 +194,7 @@ class Client:
             try:
                 if self.send_thread_kill:
                     return
-                msg = input(f'>> {self.name}: ')
+                msg = input()
                 msg_bytes = f'{self.name}: {msg}'.encode(Server.MSG_ENCODING)
                 addr_port = (self.multicast_addr_port[0], int(self.multicast_addr_port[1]))
                 print(addr_port)
@@ -211,7 +211,9 @@ class Client:
                 
                 chat_msg_bytes, ret_addr = self.multicast_rec.recvfrom(Client.RECV_SIZE)
                 chat_msg = chat_msg_bytes.decode(Server.MSG_ENCODING)
-                print(chat_msg)
+
+                print(">>", chat_msg)
+
         except:
             self.send_thread_kill = True
             return
