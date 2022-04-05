@@ -110,7 +110,15 @@ class Server:
 
                 elif CLIENT_TO_CRD_CMDS["deleteroom"] == cmd:
                     # recieve more bytes to get chatroom name
-                    pass
+                    chatroom_del_byte_len = int.from_bytes(connection.recv(1), byteorder='big')
+                    chatroom_del = connection.recv(chatroom_del_byte_len).decode(Server.MSG_ENCODING)
+                    print("Delete: " + chatroom_del)
+                    for room in self.chat_rooms:
+                    	if room['name'] == chatroom_del:
+                    		#print("Time to delete chatroom: ", room)
+                    		self.chat_rooms.remove(room)
+
+                    
             else:
                 print("INVALID command received. Closing connection ...")
                 connection.close()
@@ -261,6 +269,14 @@ class Client:
         self.dir_list = json.loads(dir.decode(Server.MSG_ENCODING))
         print(self.dir_list)
 
+    def deleteroom(self, delroompass):
+        cmd_field = CLIENT_TO_CRD_CMDS["deleteroom"].to_bytes(1, byteorder='big')
+        del_len_bytes = len(delroompass).to_bytes(1, byteorder='big')
+        del_bytes = delroompass.encode(Server.MSG_ENCODING)
+        pkt = cmd_field + del_len_bytes + del_bytes
+        self.CRDS_socket.send(pkt)
+        
+
     def send_room_info(self, room_info):
         cmd_field = CLIENT_TO_CRD_CMDS["makeroom"].to_bytes(1, byteorder='big')
 
@@ -309,7 +325,8 @@ class Client:
                         print("Chatroom: ", chatroom_name, address, port)
 
                     elif self.input_text.split()[0] == "deleteroom":
-                        pass
+                    	 delroom = self.input_text.split()[1:]
+                    	 self.deleteroom(delroom[0])
 
                     elif self.input_text == "getdir":
                         self.getdir()
